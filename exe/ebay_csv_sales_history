@@ -8,7 +8,8 @@ require_relative '../lib/ebay_file_exchange/sales_history_csv_parser'
 class EbaySalesHistory
 
   def initialize
-    parse_args options
+    options.ebay_site_id = 3 # UK
+        parse_args options
 
     @csv_files = []
     ARGV.each do |filename|
@@ -21,7 +22,7 @@ class EbaySalesHistory
     raise 'Please provide a sales history CSV file' if @csv_files.empty?
 
     @csv_files.each do |file_path|
-      parser = SalesHistoryCSVParser.new(csv_file: file_path)
+      parser = SalesHistoryCSVParser.new(csv_file: file_path, ebay_site_id: options.ebay_site_id)
       puts parser.to_s
     end
   end
@@ -38,7 +39,7 @@ class EbaySalesHistory
       opts.separator ''
 
       opts.on('-z', '--ebay-site-id integer', 'ID number of the eBay site hosting the categories.') do |ebay_site_id|
-        options.ebay_site_id = ebay_site_id
+        options.ebay_site_id = ebay_site_id.to_i
       end
 
       opts.on('-h', '-?', '--help', 'Display this screen.') do
