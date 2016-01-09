@@ -1,0 +1,59 @@
+#!/usr/bin/env ruby
+
+require_relative './helper'
+include ExecutableHelper
+
+require_relative '../lib/ebay_file_exchange/sales_history_csv_parser'
+
+class EbaySalesHistory
+
+  def initialize
+    parse_args options
+
+    @csv_files = []
+    ARGV.each do |filename|
+      if File.exist? filename
+        @csv_files << filename
+      else
+        raise "File '#{filename}' does not exist"
+      end
+    end
+    raise 'Please provide a sales history CSV file' if @csv_files.empty?
+
+    @csv_files.each do |file_path|
+      parser = SalesHistoryCSVParser.new(csv_file: file_path)
+      puts parser.to_s
+    end
+  end
+
+
+  #---------------------------------------------------------------------------
+  private
+
+  def parse_args(options)
+    ARGV << '-h' if ARGV.empty?
+    option_parser = OptionParser.new do |opts|
+      opts.banner = "Usage: #{File.basename(__FILE__)} [options] sales_history_file_path.csv"
+
+      opts.separator ''
+
+      opts.on('-z', '--ebay-site-id integer', 'ID number of the eBay site hosting the categories.') do |ebay_site_id|
+        options.ebay_site_id = ebay_site_id
+      end
+
+      opts.on('-h', '-?', '--help', 'Display this screen.') do
+        raise opts.to_s
+      end
+    end
+    option_parser.parse!
+  end
+end
+
+
+#-----------------------------------------------------------------------------
+begin
+  EbaySalesHistory.new
+rescue Exception => e
+  console e.message, :red
+  exit -1
+end
