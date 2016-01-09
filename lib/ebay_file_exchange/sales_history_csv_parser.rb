@@ -5,7 +5,7 @@ require 'iconv'
 
 class SalesHistoryCSVParser
 
-  attr_reader :csv_file, :csv_lines, :columns, :count_records
+  attr_reader :csv_file, :csv_lines, :columns, :count_records, :seller_email
 
   def initialize(csv_file:, ebay_site_id: 3)
     raise 'Can only parse CSV files from UK  [3]' unless ebay_site_id == 3
@@ -26,6 +26,8 @@ class SalesHistoryCSVParser
     read_lines
     read_column_names
     read_expected_number_of_records
+    read_seller_email
+    puts seller_email
   end
 
   def read_lines
@@ -118,6 +120,15 @@ class SalesHistoryCSVParser
     match = regexp.match(line)
     raise 'Could not determine the expected number of records!' unless match
     @count_records = match[1].to_i.freeze
+  end
+
+  # The seller's email address is in the last line of the file.
+  def read_seller_email
+    line = csv_lines[-1]
+    regexp = /^Seller ID: (.+)/
+    match = regexp.match(line)
+    raise 'Could not determine seller email address!' unless match
+    @seller_email = match[1]
   end
 
 end
