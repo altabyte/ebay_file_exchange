@@ -5,7 +5,7 @@ require 'iconv'
 
 class SalesHistoryCSVParser
 
-  attr_reader :csv_file
+  attr_reader :csv_file, :csv_lines, :columns, :count_records
 
   def initialize(csv_file:, ebay_site_id: 3)
     raise 'Can only parse CSV files from UK  [3]' unless ebay_site_id == 3
@@ -25,7 +25,7 @@ class SalesHistoryCSVParser
   def parse
     read_lines
     read_column_names
-    puts @columns.join("\n")
+    read_expected_number_of_records
   end
 
   def read_lines
@@ -55,7 +55,7 @@ class SalesHistoryCSVParser
   # This should be the first non-blank line in the file.
   #
   def read_column_names
-    @columns = @csv_lines[0].split(/[\s]*,[\s]*/)
+    @columns = csv_lines[0].split(/[\s]*,[\s]*/)
     @columns.map! { |c| c.downcase.gsub(/[^a-z 0-9]+/i, ' ').strip.gsub(/[ ]+/, '_').to_sym }
 
     required = [
@@ -108,7 +108,16 @@ class SalesHistoryCSVParser
         :post_to_country,
         :ebay_plus
     ]
-    required.each { |c| raise "Column #{c} not found" unless @columns.include?(c) }
+    required.each { |c| raise "Column #{c} not found" unless columns.include?(c) }
+  end
+
+  # The expected number of records is contained in the second last line of the CSV file.
+  def read_expected_number_of_records
+    line = csv_lines[-2]
+    regexp = /([0-9]+), record\(s\) downloaded,from/i
+    match = regexp.match(line)
+    raise 'Could not determine the expected number of records!' unless match
+    @count_records = match[1].to_i.freeze
   end
 
 end
