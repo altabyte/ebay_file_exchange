@@ -21,30 +21,30 @@ class SalesHistoryCSVParser
   end
 
   OrderItem = Struct.new(:item_number, :sku, :title, :variation_details, :quantity, :currency, :price, :sale_date, :feedback_left, :feedback_received, :transaction_id, :order_id) do
-    def custom_label;
-      sku;
+    def custom_label
+      sku
     end
 
     def custom_label=(custom_label)
-      ; self.sku = custom_label;
+      self.sku = custom_label
     end
   end
 
   Address = Struct.new(:name, :street_1, :street_2, :city, :county, :post_code, :country) do
-    def zip_code;
-      post_code;
+    def zip_code
+      post_code
     end
 
     def zip_code=(zip)
-      ; self.post_code = zip;
+      self.post_code = zip
     end
 
-    def state;
-      county;
+    def state
+      county
     end
 
     def state=(state)
-      ; self.county = state;
+      self.county = state
     end
   end
 
@@ -74,12 +74,12 @@ class SalesHistoryCSVParser
     to_hash_array.to_yaml
   end
 
-  def to_json(pretty: true)
+  def to_json(pretty: false)
     pretty ? JSON.pretty_generate(to_hash_array) : to_hash_array.to_json
   end
 
   def to_s
-    #"Sales History: '#{csv_file.path}'"
+    to_json pretty: true
   end
 
   #---------------------------------------------------------------------------
