@@ -8,7 +8,9 @@ require 'iconv'
 
 class SalesHistoryCSVParser
 
-  Order = Struct.new(:sales_record_number, :user_id, :phone_number, :email, :shipping, :insurance, :cash_on_delivery_fee, :currency, :total_price, :vat_rate, :payment_method, :sale_date, :checkout_date, :paid_on_date, :dispatch_date, :invoice_date, :invoice_number, :feedback_left, :feedback_received, :notes, :paypal_transaction_id, :delivery_service, :cash_on_delivery_option, :transaction_id)
+  Price = Struct.new(:currency, :price)
+
+  Order = Struct.new(:sales_record_number, :user_id, :email, :phone_number, :items, :shipping, :insurance, :cash_on_delivery_fee, :currency, :sale_price, :total_price, :included_vat_rate, :payment_method, :sale_date, :checkout_date, :paid_on_date, :dispatch_date, :invoice_date, :invoice_number, :notes, :paypal_transaction_id, :delivery_service, :cash_on_delivery_option, :transaction_id, :order_id, :global_shipping_programme, :global_shipping_reference_id, :click_and_collect, :click_and_collect_reference, :ebay_plus)
 
   OrderItem = Struct.new(:item_number, :sku, :title, :variation_details, :quantity, :currency, :price, :sale_date, :feedback_left, :feedback_received, :transaction_id, :order_id) do
     def custom_label; sku; end
@@ -31,7 +33,7 @@ class SalesHistoryCSVParser
   end
 
   def to_s
-    "Sales History: '#{csv_file.path}'"
+    #"Sales History: '#{csv_file.path}'"
   end
 
   #---------------------------------------------------------------------------
@@ -44,7 +46,7 @@ class SalesHistoryCSVParser
     read_seller_email
 
     hash_array = line_to_hash
-    puts hash_array.to_yaml
+    #puts hash_array.to_yaml
     rationalize(hash_array)
   end
 
@@ -186,8 +188,6 @@ class SalesHistoryCSVParser
     # Start from the last line in the categories and work backwards to simplify
     # the task of grouping items with their sales records.
     hash_array.reverse_each do |row|
-      record_number = row[:sales_record_number].to_i
-
       # If the line contains an item number, it describes a sold 'item'
       # Record the details of this item into a categories.
       # Note: This single categories may describe several of the same item, depending
@@ -196,14 +196,14 @@ class SalesHistoryCSVParser
       if item_number > 0
         item = OrderItem.new
         item.item_number        = item_number
-        item.title              = row[:item_title]
-        item.variation_details  = row[:variation_details]
-        item.custom_label       = row[:custom_label]
+        item.title              = parse_text row[:item_title]
+        item.variation_details  = parse_text row[:variation_details]
+        item.custom_label       = parse_text row[:custom_label]
         item.quantity           = row[:quantity].to_i
-        item.sale_date          = Date.parse row[:sale_date]
+        item.sale_date          = parse_date row[:sale_date]
         item.transaction_id     = row[:transaction_id].blank? ? nil : row[:transaction_id].to_i
         item.order_id           = row[:order_id].blank? ? nil : row[:order_id].to_i
-        item.feedback_left      = row[:feedback_left].downcase == 'yes'
+        item.feedback_left      = parse_text row[:feedback_left].downcase == 'yes'
         item.feedback_received  = case row[:feedback_received]
                                     when /Positive/i then  1
                                     when /Negative/i then -1
@@ -216,31 +216,85 @@ class SalesHistoryCSVParser
         item.currency = price[:currency]
         item.price = price[:price]
 
-        puts item.to_h.to_yaml
+        items << item
+      end
+
+      unless row[:buyer_email].blank?
+        order = Order.new
+        order.items                         = items
+        order.sales_record_number           = parse_int  row[:sales_record_number]
+        order.user_id                       = parse_text row[:user_id]
+        order.email                         = parse_text row[:buyer_email]
+        order.phone_number                  = parse_text row[:buyer_phone_number]
+
+        order.currency                      = parse_price(row[:sale_price]).currency
+        order.sale_price                    = parse_price(row[:sale_price]).price   # Combined total of all items
+        order.included_vat_rate             = parse_percentage(row[:included_vat_rate])
+        order.shipping                      = parse_price(row[:postage_and_packaging]).price
+        order.insurance                     = parse_price(row[:insurance]).price
+        order.cash_on_delivery_fee          = parse_price(row[:cash_on_delivery_fee]).try(:price)
+        order.total_price                   = parse_price(row[:total_price]).price  # sale_price + shipping
+
+        order.payment_method                = parse_text    row[:payment_method]
+        order.sale_date                     = parse_date    row[:sale_date]
+        order.checkout_date                 = parse_date    row[:checkout_date]
+        order.paid_on_date                  = parse_date    row[:paid_on_date]
+        order.dispatch_date                 = parse_date    row[:dispatch_date]
+        order.invoice_date                  = parse_date    row[:invoice_date]
+        order.invoice_number                = parse_int     row[:invoice_number]
+        order.notes                         = parse_text    row[:notes_to_yourself]
+        order.paypal_transaction_id         = parse_text    row[:paypal_transaction_id]
+        order.delivery_service              = parse_text    row[:delivery_service]
+        order.cash_on_delivery_option       = parse_text    row[:cash_on_delivery_option]
+        order.transaction_id                = parse_int     row[:transaction_id]
+        order.order_id                      = parse_int     row[:order_id]
+        order.global_shipping_programme     = parse_boolean row[:global_shipping_programme]
+        order.global_shipping_reference_id  = parse_text    row[:global_shipping_reference_id]
+        order.click_and_collect             = parse_boolean row[:click_and_collect]
+        order.click_and_collect_reference   = parse_text    row[:click_and_collect_reference]
+        order.ebay_plus                     = parse_boolean row[:ebay_plus]
+
+        puts order.to_h.to_yaml
       end
     end
   end
 
-
-  def parse_price(price_string)
-    price_hash = {}
-    regexp = /($|£|€)(\d+[.]\d\d)/
-    match = regexp.match(price_string)
-    raise "Could not parse price string '#{price_string}'" unless match
-    case match[1]
-      when '£' then price_hash[:currency] = 'GBP'
-      when '$' then price_hash[:currency] = 'USD'
-      when '€' then price_hash[:currency] = 'EUR'
-    end
-    price_hash[:price] = BigDecimal.new(match[2])
-    price_hash
+  def parse_text(string)
+    string.blank? ? nil : string
   end
 
-  def parse_percetage(string)
+  def parse_int(string)
+    string.blank? ? nil : string.to_i
+  end
+
+  def parse_price(string)
+    price = Price.new
+    regexp = /($|£|€)(\d+[.]\d\d)/
+    match = regexp.match(string)
+    if match
+      case match[1]
+        when '£' then price.currency = 'GBP'
+        when '$' then price.currency = 'USD'
+        when '€' then price.currency = 'EUR'
+      end
+      price.price = BigDecimal.new(match[2])
+    end
+    price
+  end
+
+  def parse_percentage(string)
     return 0.0 if string.blank?
     regexp = /(\d+[.]\d+)([%])?/
     match = regexp.match(string)
     match ? match[1].to_f : 0.0
   end
 
+  def parse_date(string)
+    string.blank? ? nil : Date.parse(string)
+  end
+
+  def parse_boolean(string)
+    return false if string.blank?
+    %w'1 true yes'.include?(string.to_s.downcase)
+  end
 end
