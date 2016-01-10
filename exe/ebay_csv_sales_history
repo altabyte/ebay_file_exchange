@@ -9,7 +9,7 @@ class EbaySalesHistory
 
   def initialize
     options.ebay_site_id = 3 # UK
-        parse_args options
+    parse_args options
 
     @csv_files = []
     ARGV.each do |filename|

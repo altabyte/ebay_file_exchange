@@ -11,27 +11,50 @@ class SalesHistoryCSVParser
 
   Price = Struct.new(:currency, :price)
 
-  Order = Struct.new(:sales_record_number, :user_id, :email, :phone_number, :items, :shipping, :insurance, :cash_on_delivery_fee, :currency, :sale_price, :total_price, :included_vat_rate, :payment_method, :sale_date, :checkout_date, :paid_on_date, :dispatch_date, :invoice_date, :invoice_number, :notes, :paypal_transaction_id, :delivery_service, :cash_on_delivery_option, :transaction_id, :order_id, :global_shipping_programme, :global_shipping_reference_id, :click_and_collect, :click_and_collect_reference, :ebay_plus)
+  Order = Struct.new(:sales_record_number, :user_id, :email, :phone_number, :items, :buyer_address, :post_to_address, :shipping, :insurance, :cash_on_delivery_fee, :currency, :sale_price, :total_price, :included_vat_rate, :payment_method, :sale_date, :checkout_date, :paid_on_date, :dispatch_date, :invoice_date, :invoice_number, :notes, :paypal_transaction_id, :delivery_service, :cash_on_delivery_option, :transaction_id, :order_id, :global_shipping_programme, :global_shipping_reference_id, :click_and_collect, :click_and_collect_reference, :ebay_plus) do
+
+    # Does the buyer was this order posted to their own address?
+    # @return true if post to address matches buyer address.
+    def post_to_buyer_address?
+      self.buyer_address.eql?(self.post_to_address)
+    end
+  end
 
   OrderItem = Struct.new(:item_number, :sku, :title, :variation_details, :quantity, :currency, :price, :sale_date, :feedback_left, :feedback_received, :transaction_id, :order_id) do
-    def custom_label; sku; end
-    def custom_label=(custom_label); self.sku = custom_label; end
+    def custom_label;
+      sku;
+    end
+
+    def custom_label=(custom_label)
+      ; self.sku = custom_label;
+    end
   end
 
   Address = Struct.new(:name, :street_1, :street_2, :city, :county, :post_code, :country) do
-    def zip_code; post_code; end
-    def zip_code=(zip); self.post_code = zip; end
-    def state; county; end
-    def state=(state); self.county = state; end
+    def zip_code;
+      post_code;
+    end
+
+    def zip_code=(zip)
+      ; self.post_code = zip;
+    end
+
+    def state;
+      county;
+    end
+
+    def state=(state)
+      ; self.county = state;
+    end
   end
 
-  attr_reader :csv_file, :csv_lines, :columns, :count_orders, :seller_email, :orders
+  attr_reader :ebay_site_id, :csv_file, :csv_lines, :columns, :count_orders, :seller_email, :orders
 
   def initialize(csv_file:, ebay_site_id: 3)
     raise 'Can only parse CSV files from UK  [3]' unless ebay_site_id == 3
     raise "File '#{csv_file}' does not exist" unless File.exist?(csv_file)
     @csv_file = File.new csv_file
-
+    @ebay_site_id = ebay_site_id
     parse
   end
 
@@ -40,6 +63,8 @@ class SalesHistoryCSVParser
     orders.each do |order|
       hash = order.to_h
       hash[:items].map! { |item| item.to_h }
+      hash[:buyer_address] = hash[:buyer_address].to_h
+      hash[:post_to_address] = hash[:post_to_address].to_h
       hash_array << hash
     end
     hash_array
@@ -180,7 +205,7 @@ class SalesHistoryCSVParser
     rows = []
     line = ''
     1.upto(csv_lines.length - 3) do |i|
-      line = (line + "\n" + csv_lines[i]).strip  # if there is a line break in one of the fields
+      line = (line + "\n" + csv_lines[i]).strip # if there is a line break in one of the fields
       line_fields = line.split(/"[\s]*,[\s]*"/)
       line = ''
 
@@ -192,7 +217,7 @@ class SalesHistoryCSVParser
       # If the first field starts with a double quote - remove it...
       # Eg. "1234  => 1234
       # This happens because the line is split using "," pattern
-      line_fields[0]  = line_fields.first[1..line_fields.first.length] if line_fields.first.start_with?('"')
+      line_fields[0] = line_fields.first[1..line_fields.first.length] if line_fields.first.start_with?('"')
       line_fields[-1] = line_fields.last.chop if line_fields.last.end_with?('"')
 
       hash = {}
@@ -204,7 +229,7 @@ class SalesHistoryCSVParser
 
   def build(hash_array)
     @orders = []
-    items = []  # Array of items belonging to the current sales record
+    items = [] # Array of items belonging to the current sales record
 
     # Start from the last line in the categories and work backwards to simplify
     # the task of grouping items with their sales records.
@@ -216,22 +241,25 @@ class SalesHistoryCSVParser
       item_number = row[:item_number].to_i
       if item_number > 0
         item = OrderItem.new
-        item.item_number        = item_number
-        item.title              = parse_text row[:item_title]
-        item.variation_details  = parse_text row[:variation_details]
-        item.custom_label       = parse_text row[:custom_label]
-        item.quantity           = row[:quantity].to_i
-        item.sale_date          = parse_date row[:sale_date]
-        item.transaction_id     = row[:transaction_id].blank? ? nil : row[:transaction_id].to_i
-        item.order_id           = row[:order_id].blank? ? nil : row[:order_id].to_i
-        item.feedback_left      = parse_text row[:feedback_left].downcase == 'yes'
-        item.feedback_received  = case row[:feedback_received]
-                                    when /Positive/i then  1
-                                    when /Negative/i then -1
-                                    when /Neutral/i  then  0
-                                    else
-                                      nil
-                                  end
+        item.item_number = item_number
+        item.title = parse_text row[:item_title]
+        item.variation_details = parse_text row[:variation_details]
+        item.custom_label = parse_text row[:custom_label]
+        item.quantity = row[:quantity].to_i
+        item.sale_date = parse_date row[:sale_date]
+        item.transaction_id = row[:transaction_id].blank? ? nil : row[:transaction_id].to_i
+        item.order_id = row[:order_id].blank? ? nil : row[:order_id].to_i
+        item.feedback_left = parse_text row[:feedback_left].downcase == 'yes'
+        item.feedback_received = case row[:feedback_received]
+                                   when /Positive/i then
+                                     1
+                                   when /Negative/i then
+                                     -1
+                                   when /Neutral/i then
+                                     0
+                                   else
+                                     nil
+                                 end
 
         price = parse_price(row[:sale_price])
         item.currency = price[:currency]
@@ -242,38 +270,60 @@ class SalesHistoryCSVParser
 
       unless row[:buyer_email].blank?
         order = Order.new
-        order.items                         = items
-        order.sales_record_number           = parse_int  row[:sales_record_number]
-        order.user_id                       = parse_text row[:user_id]
-        order.email                         = parse_text row[:buyer_email]
-        order.phone_number                  = parse_text row[:buyer_phone_number]
+        order.items = items
+        order.sales_record_number = parse_int row[:sales_record_number]
+        order.user_id = parse_text row[:user_id]
+        order.email = parse_text row[:buyer_email]
+        order.phone_number = parse_text row[:buyer_phone_number]
 
-        order.currency                      = parse_price(row[:sale_price]).currency
-        order.sale_price                    = parse_price(row[:sale_price]).price   # Combined total of all items
-        order.included_vat_rate             = parse_percentage(row[:included_vat_rate])
-        order.shipping                      = parse_price(row[:postage_and_packaging]).price
-        order.insurance                     = parse_price(row[:insurance]).price
-        order.cash_on_delivery_fee          = parse_price(row[:cash_on_delivery_fee]).try(:price)
-        order.total_price                   = parse_price(row[:total_price]).price  # sale_price + shipping
+        order.currency = parse_price(row[:sale_price]).currency
+        order.sale_price = parse_price(row[:sale_price]).price # Combined total of all items
+        order.included_vat_rate = parse_percentage(row[:included_vat_rate])
+        order.shipping = parse_price(row[:postage_and_packaging]).price
+        order.insurance = parse_price(row[:insurance]).price
+        order.cash_on_delivery_fee = parse_price(row[:cash_on_delivery_fee]).try(:price)
+        order.total_price = parse_price(row[:total_price]).price # sale_price + shipping
 
-        order.payment_method                = parse_text    row[:payment_method]
-        order.sale_date                     = parse_date    row[:sale_date]
-        order.checkout_date                 = parse_date    row[:checkout_date]
-        order.paid_on_date                  = parse_date    row[:paid_on_date]
-        order.dispatch_date                 = parse_date    row[:dispatch_date]
-        order.invoice_date                  = parse_date    row[:invoice_date]
-        order.invoice_number                = parse_int     row[:invoice_number]
-        order.notes                         = parse_text    row[:notes_to_yourself]
-        order.paypal_transaction_id         = parse_text    row[:paypal_transaction_id]
-        order.delivery_service              = parse_text    row[:delivery_service]
-        order.cash_on_delivery_option       = parse_text    row[:cash_on_delivery_option]
-        order.transaction_id                = parse_int     row[:transaction_id]
-        order.order_id                      = parse_int     row[:order_id]
-        order.global_shipping_programme     = parse_boolean row[:global_shipping_programme]
-        order.global_shipping_reference_id  = parse_text    row[:global_shipping_reference_id]
-        order.click_and_collect             = parse_boolean row[:click_and_collect]
-        order.click_and_collect_reference   = parse_text    row[:click_and_collect_reference]
-        order.ebay_plus                     = parse_boolean row[:ebay_plus]
+        order.payment_method = parse_text row[:payment_method]
+        order.sale_date = parse_date row[:sale_date]
+        order.checkout_date = parse_date row[:checkout_date]
+        order.paid_on_date = parse_date row[:paid_on_date]
+        order.dispatch_date = parse_date row[:dispatch_date]
+        order.invoice_date = parse_date row[:invoice_date]
+        order.invoice_number = parse_int row[:invoice_number]
+        order.notes = parse_text row[:notes_to_yourself]
+        order.paypal_transaction_id = parse_text row[:paypal_transaction_id]
+        order.delivery_service = parse_text row[:delivery_service]
+        order.cash_on_delivery_option = parse_text row[:cash_on_delivery_option]
+        order.transaction_id = parse_int row[:transaction_id]
+        order.order_id = parse_int row[:order_id]
+        order.global_shipping_programme = parse_boolean row[:global_shipping_programme]
+        order.global_shipping_reference_id = parse_text row[:global_shipping_reference_id]
+        order.click_and_collect = parse_boolean row[:click_and_collect]
+        order.click_and_collect_reference = parse_text row[:click_and_collect_reference]
+        order.ebay_plus = parse_boolean row[:ebay_plus]
+
+        buyer_address = Address.new
+        buyer_address.name = parse_text row[:buyer_full_name]
+        buyer_address.street_1 = parse_text row[:buyer_address_1]
+        buyer_address.street_2 = parse_text row[:buyer_address_2]
+        buyer_address.city = parse_text row[:buyer_town_city]
+        buyer_address.county = parse_text row[:buyer_county]
+        buyer_address.post_code = parse_text row[:buyer_postcode]
+        buyer_address.country = parse_text row[:buyer_country]
+        order.buyer_address = buyer_address
+
+        if row.key? :post_to_address_1
+          post_to_address = Address.new
+          post_to_address.name = parse_text row[:buyer_full_name]
+          post_to_address.street_1 = parse_text row[:post_to_address_1]
+          post_to_address.street_2 = parse_text row[:post_to_address_2]
+          post_to_address.city = parse_text row[:post_to_city]
+          post_to_address.county = parse_text row[:post_to_county]
+          post_to_address.post_code = parse_text row[:post_to_postcode]
+          post_to_address.country = parse_text row[:post_to_country]
+          order.post_to_address = post_to_address
+        end
 
         @orders << order
       end
@@ -294,9 +344,12 @@ class SalesHistoryCSVParser
     match = regexp.match(string)
     if match
       case match[1]
-        when '£' then price.currency = 'GBP'
-        when '$' then price.currency = 'USD'
-        when '€' then price.currency = 'EUR'
+        when '£' then
+          price.currency = 'GBP'
+        when '$' then
+          price.currency = 'USD'
+        when '€' then
+          price.currency = 'EUR'
       end
       price.price = BigDecimal.new(match[2])
     end
