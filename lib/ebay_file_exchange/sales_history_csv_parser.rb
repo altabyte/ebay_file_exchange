@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require 'yaml'
+
 require 'active_support/core_ext/string'
 require 'iconv'
 
@@ -9,7 +11,7 @@ class SalesHistoryCSVParser
 
   def initialize(csv_file:, ebay_site_id: 3)
     raise 'Can only parse CSV files from UK  [3]' unless ebay_site_id == 3
-    raise "File '#{csv_file}' does not exist" if !File.exist?(csv_file)
+    raise "File '#{csv_file}' does not exist" unless File.exist?(csv_file)
     @csv_file = File.new csv_file
 
     parse
@@ -27,7 +29,9 @@ class SalesHistoryCSVParser
     read_column_names
     read_expected_number_of_records
     read_seller_email
-    puts seller_email
+
+    hash_array = line_to_hash
+    puts hash_array.to_yaml
   end
 
   def read_lines
@@ -40,6 +44,7 @@ class SalesHistoryCSVParser
         # Put double quotes into any seemingly unquoted fields.
         # Unquoted fields will contain ",,"
         line = line.gsub(/,,/, ',"",')
+        line = line << '""' if line.end_with?(',')
         @csv_lines.push(line)
       end
     rescue Iconv::IllegalSequence => exception
@@ -129,6 +134,36 @@ class SalesHistoryCSVParser
     match = regexp.match(line)
     raise 'Could not determine seller email address!' unless match
     @seller_email = match[1]
+  end
+
+  #
+  # Read each line of the CSV data.
+  # This method assumes that every field is ALWAYS double quoted.
+  #
+  def line_to_hash
+    rows = []
+    line = ''
+    1.upto(csv_lines.length - 3) do |i|
+      line = (line + "\n" + csv_lines[i]).strip  # if there is a line break in one of the fields
+      line_fields = line.split(/"[\s]*,[\s]*"/)
+      line = ''
+
+      raise "There are more fields in the row #{i+1} than there are column names!" if line_fields.count > columns.count
+
+      # If the number of fields is less than the number of columns append the next line to this and try again.
+      next if line_fields.length < columns.count
+
+      # If the first field starts with a double quote - remove it...
+      # Eg. "1234  => 1234
+      # This happens because the line is split using "," pattern
+      line_fields[0]  = line_fields.first[1..line_fields.first.length] if line_fields.first.start_with?('"')
+      line_fields[-1] = line_fields.last.chop if line_fields.last.end_with?('"')
+
+      hash = {}
+      columns.count.times { |c| hash[columns[c]] = line_fields[c] }
+      rows << hash
+    end
+    rows
   end
 
 end
