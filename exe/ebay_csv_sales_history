@@ -23,7 +23,7 @@ class EbaySalesHistory
 
     @csv_files.each do |file_path|
       parser = SalesHistoryCSVParser.new(csv_file: file_path, ebay_site_id: options.ebay_site_id)
-      puts parser.to_s
+      puts parser.to_json(pretty: true)
     end
   end
 

@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require 'JSON'
 require 'yaml'
 
 require 'active_support/core_ext/string'
@@ -20,9 +21,11 @@ class SalesHistoryCSVParser
   Address = Struct.new(:name, :street_1, :street_2, :city, :county, :post_code, :country) do
     def zip_code; post_code; end
     def zip_code=(zip); self.post_code = zip; end
+    def state; county; end
+    def state=(state); self.county = state; end
   end
 
-  attr_reader :csv_file, :csv_lines, :columns, :count_records, :seller_email
+  attr_reader :csv_file, :csv_lines, :columns, :count_orders, :seller_email, :orders
 
   def initialize(csv_file:, ebay_site_id: 3)
     raise 'Can only parse CSV files from UK  [3]' unless ebay_site_id == 3
@@ -30,6 +33,24 @@ class SalesHistoryCSVParser
     @csv_file = File.new csv_file
 
     parse
+  end
+
+  def to_hash_array
+    hash_array = []
+    orders.each do |order|
+      hash = order.to_h
+      hash[:items].map! { |item| item.to_h }
+      hash_array << hash
+    end
+    hash_array
+  end
+
+  def to_yaml
+    to_hash_array.to_yaml
+  end
+
+  def to_json(pretty: true)
+    pretty ? JSON.pretty_generate(to_hash_array) : to_hash_array.to_json
   end
 
   def to_s
@@ -41,13 +62,12 @@ class SalesHistoryCSVParser
 
   def parse
     read_lines
-    read_column_names
-    read_expected_number_of_records
-    read_seller_email
+    extract_column_names
+    find_number_of_orders
+    find_seller_email
 
-    hash_array = line_to_hash
-    #puts hash_array.to_yaml
-    rationalize(hash_array)
+    hash_array = lines_to_hash
+    build(hash_array)
   end
 
   def read_lines
@@ -77,7 +97,7 @@ class SalesHistoryCSVParser
   # Read the names of all the columns in the CSV data as an array of symbols.
   # This should be the first non-blank line in the file.
   #
-  def read_column_names
+  def extract_column_names
     @columns = csv_lines[0].split(/[\s]*,[\s]*/)
     @columns.map! { |c| c.downcase.gsub(/[^a-z 0-9]+/i, ' ').strip.gsub(/[ ]+/, '_').to_sym }
 
@@ -134,17 +154,18 @@ class SalesHistoryCSVParser
     required.each { |c| raise "Column #{c} not found" unless columns.include?(c) }
   end
 
-  # The expected number of records is contained in the second last line of the CSV file.
-  def read_expected_number_of_records
+  # The expected number of orders/records is stated in the second last line of the CSV file.
+  # Use this value for error checking after building the data hash.
+  def find_number_of_orders
     line = csv_lines[-2]
     regexp = /([0-9]+), record\(s\) downloaded,from/i
     match = regexp.match(line)
     raise 'Could not determine the expected number of records!' unless match
-    @count_records = match[1].to_i.freeze
+    @count_orders = match[1].to_i.freeze
   end
 
   # The seller's email address is in the last line of the file.
-  def read_seller_email
+  def find_seller_email
     line = csv_lines[-1]
     regexp = /^Seller ID: (.+)/
     match = regexp.match(line)
@@ -152,11 +173,10 @@ class SalesHistoryCSVParser
     @seller_email = match[1]
   end
 
-  #
   # Read each line of the CSV data.
   # This method assumes that every field is ALWAYS double quoted.
   #
-  def line_to_hash
+  def lines_to_hash
     rows = []
     line = ''
     1.upto(csv_lines.length - 3) do |i|
@@ -182,8 +202,9 @@ class SalesHistoryCSVParser
     rows
   end
 
-  def rationalize(hash_array)
-    items = []  # An array of all items associated with the current sales record
+  def build(hash_array)
+    @orders = []
+    items = []  # Array of items belonging to the current sales record
 
     # Start from the last line in the categories and work backwards to simplify
     # the task of grouping items with their sales records.
@@ -254,7 +275,7 @@ class SalesHistoryCSVParser
         order.click_and_collect_reference   = parse_text    row[:click_and_collect_reference]
         order.ebay_plus                     = parse_boolean row[:ebay_plus]
 
-        puts order.to_h.to_yaml
+        @orders << order
       end
     end
   end
