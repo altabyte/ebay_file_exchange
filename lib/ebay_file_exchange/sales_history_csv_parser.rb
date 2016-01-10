@@ -3,9 +3,22 @@
 require 'yaml'
 
 require 'active_support/core_ext/string'
+require 'active_support/time'
 require 'iconv'
 
 class SalesHistoryCSVParser
+
+  Order = Struct.new(:sales_record_number, :user_id, :phone_number, :email, :shipping, :insurance, :cash_on_delivery_fee, :currency, :total_price, :vat_rate, :payment_method, :sale_date, :checkout_date, :paid_on_date, :dispatch_date, :invoice_date, :invoice_number, :feedback_left, :feedback_received, :notes, :paypal_transaction_id, :delivery_service, :cash_on_delivery_option, :transaction_id)
+
+  OrderItem = Struct.new(:item_number, :sku, :title, :variation_details, :quantity, :currency, :price, :sale_date, :feedback_left, :feedback_received, :transaction_id, :order_id) do
+    def custom_label; sku; end
+    def custom_label=(custom_label); self.sku = custom_label; end
+  end
+
+  Address = Struct.new(:name, :street_1, :street_2, :city, :county, :post_code, :country) do
+    def zip_code; post_code; end
+    def zip_code=(zip); self.post_code = zip; end
+  end
 
   attr_reader :csv_file, :csv_lines, :columns, :count_records, :seller_email
 
@@ -32,6 +45,7 @@ class SalesHistoryCSVParser
 
     hash_array = line_to_hash
     puts hash_array.to_yaml
+    rationalize(hash_array)
   end
 
   def read_lines
@@ -164,6 +178,69 @@ class SalesHistoryCSVParser
       rows << hash
     end
     rows
+  end
+
+  def rationalize(hash_array)
+    items = []  # An array of all items associated with the current sales record
+
+    # Start from the last line in the categories and work backwards to simplify
+    # the task of grouping items with their sales records.
+    hash_array.reverse_each do |row|
+      record_number = row[:sales_record_number].to_i
+
+      # If the line contains an item number, it describes a sold 'item'
+      # Record the details of this item into a categories.
+      # Note: This single categories may describe several of the same item, depending
+      #       upon the value of the QUANTITY field.
+      item_number = row[:item_number].to_i
+      if item_number > 0
+        item = OrderItem.new
+        item.item_number        = item_number
+        item.title              = row[:item_title]
+        item.variation_details  = row[:variation_details]
+        item.custom_label       = row[:custom_label]
+        item.quantity           = row[:quantity].to_i
+        item.sale_date          = Date.parse row[:sale_date]
+        item.transaction_id     = row[:transaction_id].blank? ? nil : row[:transaction_id].to_i
+        item.order_id           = row[:order_id].blank? ? nil : row[:order_id].to_i
+        item.feedback_left      = row[:feedback_left].downcase == 'yes'
+        item.feedback_received  = case row[:feedback_received]
+                                    when /Positive/i then  1
+                                    when /Negative/i then -1
+                                    when /Neutral/i  then  0
+                                    else
+                                      nil
+                                  end
+
+        price = parse_price(row[:sale_price])
+        item.currency = price[:currency]
+        item.price = price[:price]
+
+        puts item.to_h.to_yaml
+      end
+    end
+  end
+
+
+  def parse_price(price_string)
+    price_hash = {}
+    regexp = /($|£|€)(\d+[.]\d\d)/
+    match = regexp.match(price_string)
+    raise "Could not parse price string '#{price_string}'" unless match
+    case match[1]
+      when '£' then price_hash[:currency] = 'GBP'
+      when '$' then price_hash[:currency] = 'USD'
+      when '€' then price_hash[:currency] = 'EUR'
+    end
+    price_hash[:price] = BigDecimal.new(match[2])
+    price_hash
+  end
+
+  def parse_percetage(string)
+    return 0.0 if string.blank?
+    regexp = /(\d+[.]\d+)([%])?/
+    match = regexp.match(string)
+    match ? match[1].to_f : 0.0
   end
 
 end
